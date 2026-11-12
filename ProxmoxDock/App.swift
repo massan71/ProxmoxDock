@@ -28,7 +28,7 @@ struct ProxmoxDockApp: App {
         }
 
         // One window per console (node shell, VM or container)
-        WindowGroup("Console", id: "console", for: ConsoleTarget.self) { $target in
+        WindowGroup("Console", id: "console", for: ResourceTarget.self) { $target in
             if let target {
                 ConsoleWindow(target: target)
                     .environmentObject(store)
@@ -36,6 +36,16 @@ struct ProxmoxDockApp: App {
         }
         .defaultSize(width: 1024, height: 700)
         .commandsRemoved() // no "New Console Window" menu item: consoles open from a node or guest
+
+        // One window per performance view (node, VM or container)
+        WindowGroup("Performance", id: "performance", for: ResourceTarget.self) { $target in
+            if let target {
+                PerformanceWindow(target: target)
+                    .environmentObject(store)
+            }
+        }
+        .defaultSize(width: 900, height: 640)
+        .commandsRemoved()
 
         MenuBarExtra(isInserted: $showMenuBar) {
             MenuBarView()

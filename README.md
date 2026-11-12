@@ -11,6 +11,7 @@ A macOS Dock and menu bar app to monitor and manage a [Proxmox VE](https://www.p
 - **Overview**: nodes online, running VMs/containers, problems, failed tasks, Ceph health, and per node CPU, memory, root disk, ZFS pools, SMART summary and available updates
 - **VMs & Containers**: status, ID, name, **IP addresses**, type, node, CPU, memory, uptime and tags, with search (also by IP) and filters; right-click to **start, shut down, reboot or stop** a guest, **copy its IP, SSH to it** in Terminal or **open it in the browser**
 - **Guest details** (double-click): power actions, **snapshots** (take, with or without RAM; roll back, optionally starting the guest; delete) and **backup now** (vzdump with zstd to a storage of your choice, snapshot/suspend/stop mode)
+- **Performance charts** in their own windows: CPU, IO wait, load, memory and network for nodes; CPU, memory, network and disk I/O for VMs and containers — last hour, day, week, month or year, refreshed every minute, from Proxmox's own history (RRD)
 - **Consoles**: open a node's shell (xterm.js) or a VM (noVNC) or container (xterm.js) console in its own window — from the terminal button on a node, a guest's context menu or the guest details
 - **Storage**: usage of every storage, shared storage listed once
 - **Tasks**: tasks of the last 24 hours, with failed ones highlighted; tasks started from the app show their progress until they finish
@@ -44,6 +45,10 @@ Requires macOS 14 or later (universal: Apple silicon and Intel) and Proxmox VE w
 ### Guest IP addresses
 
 VMs report their addresses through the **QEMU guest agent**: install `qemu-guest-agent` in the VM and enable *QEMU Guest Agent* under the VM's Options; the token needs **VM.GuestAgent.Audit** (**VM.Monitor** before Proxmox VE 9). Containers report their interfaces directly (**VM.Audit**). Loopback, link-local and container-runtime bridge addresses (Docker, Podman, Kubernetes) are left out, IPv4 first. Addresses refresh every 5 minutes and when you open a guest's details. "SSH to…" opens Terminal with the user name set in Settings (`root` by default).
+
+### Performance charts
+
+Open them from the chart button on a node card, a guest's context menu (**Show Performance**) or the **Performance** button in the guest details. They use the history Proxmox already keeps (the same data as its web charts), so nothing needs to be installed; nodes need **Sys.Audit**, guests **VM.Audit** (both in PVEAuditor).
 
 ### Health checks
 
@@ -91,6 +96,7 @@ Sets the version, builds a clean universal Release, zips and verifies it, then a
 | `ProxmoxDock/GuestDetailView.swift` | Power, snapshots and backup for one guest |
 | `ProxmoxDock/SettingsView.swift` | Settings, including certificate review |
 | `ProxmoxDock/GuestConnect.swift` | Copy, SSH and browser shortcuts for guest IPs |
+| `ProxmoxDock/PerformanceView.swift` | Performance windows and charts |
 | `ProxmoxDock/ConsoleView.swift` | Console windows: login when needed, then noVNC or xterm.js |
 | `ProxmoxDock/MenuBarView.swift` | Menu bar icon and panel |
 | `ProxmoxDock/App.swift` | Entry point and Dock menu |

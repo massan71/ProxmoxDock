@@ -96,7 +96,10 @@ struct GuestDetailView: View {
                 .disabled((action == .start) == g.isRunning || store.isBusy(g))
             }
             Spacer()
-            Button { openWindow(id: "console", value: ConsoleTarget.guest(g)) } label: {
+            Button { openWindow(id: "performance", value: ResourceTarget.guest(g)) } label: {
+                Label("Performance", systemImage: "chart.xyaxis.line")
+            }
+            Button { openWindow(id: "console", value: ResourceTarget.guest(g)) } label: {
                 Label("Console", systemImage: "terminal")
             }
         }

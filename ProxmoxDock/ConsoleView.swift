@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import WebKit
 
-/// What a console window shows: a node's shell, a VM (noVNC) or a container (xterm.js).
-struct ConsoleTarget: Codable, Hashable, Identifiable {
+/// A node, VM or container shown in its own window (console or performance).
+struct ResourceTarget: Codable, Hashable, Identifiable {
     enum Kind: String, Codable { case node, qemu, lxc }
     var kind: Kind
     var node: String
@@ -20,9 +20,9 @@ struct ConsoleTarget: Codable, Hashable, Identifiable {
         }
     }
 
-    static func node(_ name: String) -> ConsoleTarget { ConsoleTarget(kind: .node, node: name, vmid: nil, name: name) }
-    static func guest(_ g: Guest) -> ConsoleTarget {
-        ConsoleTarget(kind: g.kind == .qemu ? .qemu : .lxc, node: g.node, vmid: g.vmid, name: g.displayName)
+    static func node(_ name: String) -> ResourceTarget { ResourceTarget(kind: .node, node: name, vmid: nil, name: name) }
+    static func guest(_ g: Guest) -> ResourceTarget {
+        ResourceTarget(kind: g.kind == .qemu ? .qemu : .lxc, node: g.node, vmid: g.vmid, name: g.displayName)
     }
 
     /// The Proxmox web interface, where the user logs in to get a ticket.
@@ -51,7 +51,7 @@ struct ConsoleTarget: Codable, Hashable, Identifiable {
 
 /// A window with the console of a node, VM or container.
 struct ConsoleWindow: View {
-    let target: ConsoleTarget
+    let target: ResourceTarget
     @EnvironmentObject var store: Store
     @StateObject private var model = ConsoleModel()
 
@@ -80,7 +80,7 @@ struct ConsoleWindow: View {
                 .padding(10)
                 .background(.blue.opacity(0.10))
             }
-            if let url = target.url(base: store.baseURL), let login = ConsoleTarget.loginURL(base: store.baseURL) {
+            if let url = target.url(base: store.baseURL), let login = ResourceTarget.loginURL(base: store.baseURL) {
                 ConsoleWebView(consoleURL: url, loginURL: login, model: model)
             } else {
                 ContentUnavailableView("Server not configured", systemImage: "server.rack",

@@ -274,7 +274,12 @@ struct NodeCard: View {
                 Spacer()
                 Text(node.online ? "Up \(Fmt.uptime(node.uptime))" : "Offline").font(.caption).foregroundStyle(.secondary)
                 if node.online {
-                    Button { openWindow(id: "console", value: ConsoleTarget.node(node.name)) } label: {
+                    Button { openWindow(id: "performance", value: ResourceTarget.node(node.name)) } label: {
+                        Image(systemName: "chart.xyaxis.line")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Show \(node.name)'s performance")
+                    Button { openWindow(id: "console", value: ResourceTarget.node(node.name)) } label: {
                         Image(systemName: "terminal")
                     }
                     .buttonStyle(.borderless)
@@ -426,8 +431,11 @@ struct GuestsView: View {
                         .disabled((action == .start) == g.isRunning || store.isBusy(g))
                 }
                 Divider()
-                Button { openWindow(id: "console", value: ConsoleTarget.guest(g)) } label: {
+                Button { openWindow(id: "console", value: ResourceTarget.guest(g)) } label: {
                     Label("Open Console", systemImage: "terminal")
+                }
+                Button { openWindow(id: "performance", value: ResourceTarget.guest(g)) } label: {
+                    Label("Show Performance", systemImage: "chart.xyaxis.line")
                 }
                 if let ips = store.addresses[g.id]?.addresses, g.isRunning, !ips.isEmpty {
                     Divider()

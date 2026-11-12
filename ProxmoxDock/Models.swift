@@ -392,7 +392,8 @@ enum Fmt {
     }()
     private static let dateTimeStyle = Date.FormatStyle(date: .abbreviated, time: .shortened).locale(locale)
 
-    static func bytes(_ v: Double) -> String { byteFormatter.string(fromByteCount: Int64(v)) }
+    /// "0" instead of ByteCountFormatter's "Zero KB" (e.g. on chart axes)
+    static func bytes(_ v: Double) -> String { v < 1 ? "0" : byteFormatter.string(fromByteCount: Int64(v)) }
     static func relative(_ d: Date) -> String { relativeFormatter.localizedString(for: d, relativeTo: Date()) }
     static func dateTime(_ d: Date) -> String { d.formatted(dateTimeStyle) }
     static func uptime(_ seconds: Double) -> String { seconds > 0 ? (durationFormatter.string(from: seconds) ?? "") : "—" }
@@ -571,4 +572,37 @@ struct GuestInterface: Decodable {
 /// The guest agent wraps its answer: {"result": [interfaces]}
 struct AgentInterfaces: Decodable {
     var result: [GuestInterface]
+}
+
+// MARK: - Performance history (GET .../rrddata)
+
+/// One sample of Proxmox's RRD history. Field names aren't in the API schema, so every
+/// numeric field is kept by name (cpu, mem/memused, netin, netout, diskread, loadavg, …).
+struct RRDPoint: Decodable, Identifiable {
+    var time: Date
+    var values: [String: Double]
+    var id: Double { time.timeIntervalSince1970 }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyCodingKey.self)
+        time = (c.double("time") ?? 0).asDate
+        var v: [String: Double] = [:]
+        for key in c.allKeys where key.stringValue != "time" {
+            if let d = c.double(key.stringValue), d.isFinite { v[key.stringValue] = d }
+        }
+        values = v
+    }
+
+    /// The first of the given fields that this sample has.
+    func value(_ keys: [String]) -> Double? {
+        for k in keys { if let v = values[k] { return v } }
+        return nil
+    }
+    func value(_ keys: String...) -> Double? { value(keys) }
+}
+
+enum RRDTimeframe: String, CaseIterable, Identifiable {
+    case hour, day, week, month, year
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
 }

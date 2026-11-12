@@ -244,6 +244,24 @@ struct ProxmoxAPI {
     func updates(node: String) async throws -> [AptPackage] { try await get("/nodes/\(enc(node))/apt/update") }
     func cephHealth() async throws -> CephHealth { try await get("/cluster/ceph/status") }
 
+    // MARK: Performance history
+
+    /// RRD history of a node, VM or container (averages). Nodes need Sys.Audit, guests VM.Audit.
+    func rrd(_ target: ResourceTarget, timeframe: RRDTimeframe) async throws -> [RRDPoint] {
+        let path: String
+        switch target.kind {
+        case .node: path = "/nodes/\(enc(target.node))/rrddata"
+        case .qemu: path = "/nodes/\(enc(target.node))/qemu/\(target.vmid ?? 0)/rrddata"
+        case .lxc: path = "/nodes/\(enc(target.node))/lxc/\(target.vmid ?? 0)/rrddata"
+        }
+        let points: [RRDPoint] = try await get(path, query: [
+            URLQueryItem(name: "timeframe", value: timeframe.rawValue),
+            URLQueryItem(name: "cf", value: "AVERAGE"),
+        ])
+        // Samples without any value (before the guest existed or while it was off) are dropped
+        return points.filter { !$0.values.isEmpty }.sorted { $0.time < $1.time }
+    }
+
     // MARK: Guest IP addresses
 
     /// IPs of a running guest. VMs need the QEMU guest agent and VM.GuestAgent.Audit
