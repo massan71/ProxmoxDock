@@ -236,6 +236,14 @@ struct ProxmoxAPI {
         ])
     }
 
+    // MARK: Health
+
+    func zfsPools(node: String) async throws -> [ZFSPool] { try await get("/nodes/\(enc(node))/disks/zfs") }
+    func disks(node: String) async throws -> [NodeDisk] { try await get("/nodes/\(enc(node))/disks/list") }
+    /// The cached list of available updates (does not run apt update); needs Sys.Modify.
+    func updates(node: String) async throws -> [AptPackage] { try await get("/nodes/\(enc(node))/apt/update") }
+    func cephHealth() async throws -> CephHealth { try await get("/cluster/ceph/status") }
+
     // MARK: Actions (each starts a task and returns its UPID)
 
     enum PowerAction: String, CaseIterable, Identifiable {

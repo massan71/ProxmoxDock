@@ -231,6 +231,18 @@ struct OverviewView: View {
                     .background(RoundedRectangle(cornerRadius: 12).fill(.background.secondary))
                 }
 
+                if let ceph = store.ceph {
+                    HStack(spacing: 8) {
+                        Image(systemName: "circle.hexagongrid.fill")
+                            .foregroundStyle(ceph.status == "HEALTH_OK" ? .green : (ceph.status == "HEALTH_WARN" ? .orange : .red))
+                        Text("Ceph \(ceph.status)").font(.headline)
+                        Text(ceph.summaries.prefix(2).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(.background.secondary))
+                }
+
                 HStack(alignment: .firstTextBaseline) {
                     Text("Nodes").font(.title3.bold())
                     Spacer()
@@ -278,9 +290,58 @@ struct NodeCard: View {
             }
             Text("\(guests.filter(\.isRunning).count) of \(guests.count) VMs/CTs running")
                 .font(.caption).foregroundStyle(.secondary)
+            if node.online { NodeHealth(node: node.name) }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 12).fill(.background.secondary))
+    }
+}
+
+/// ZFS pools, SMART and available updates of one node.
+struct NodeHealth: View {
+    let node: String
+    @EnvironmentObject var store: Store
+
+    var body: some View {
+        let pools = store.zfsPools[node] ?? []
+        let disks = store.disks[node]
+        let updates = store.updates[node]
+        if !pools.isEmpty || disks != nil || updates != nil {
+            Divider()
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(pools) { p in
+                    HStack(spacing: 6) {
+                        Image(systemName: p.isHealthy ? "checkmark.circle.fill" : "exclamationmark.octagon.fill")
+                            .foregroundStyle(p.isHealthy ? .green : .red)
+                        Text("ZFS \(p.name)")
+                        Text(p.health).foregroundStyle(p.isHealthy ? Color.secondary : Color.red)
+                        Spacer()
+                        Text("\(Fmt.percent(p.fraction)) used").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                if let disks {
+                    let failing = disks.filter(\.isFailing)
+                    HStack(spacing: 6) {
+                        Image(systemName: failing.isEmpty ? "checkmark.circle.fill" : "exclamationmark.octagon.fill")
+                            .foregroundStyle(failing.isEmpty ? .green : .red)
+                        Text(failing.isEmpty ? "\(disks.count) disk(s), SMART OK"
+                                             : "\(failing.count) of \(disks.count) disk(s) failing SMART")
+                        Spacer()
+                    }
+                    .help(disks.map { "\($0.label): \($0.health ?? "no SMART data")\($0.wearout.map { ", wearout \($0)" } ?? "")" }.joined(separator: "\n"))
+                }
+                if let updates {
+                    HStack(spacing: 6) {
+                        Image(systemName: updates.isEmpty ? "checkmark.circle.fill" : "arrow.down.circle.fill")
+                            .foregroundStyle(updates.isEmpty ? .green : .blue)
+                        Text(updates.isEmpty ? "Up to date" : "\(updates.count) update(s) available")
+                        Spacer()
+                    }
+                    .help(updates.prefix(25).map { "\($0.package) \($0.oldVersion.map { "\($0) → " } ?? "")\($0.version)" }.joined(separator: "\n"))
+                }
+            }
+            .font(.caption)
+        }
     }
 }
 

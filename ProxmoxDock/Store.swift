@@ -11,23 +11,6 @@ enum SettingsKey {
     static let showDockIcon = "showDockIcon"
 }
 
-/// Something that needs attention; the Dock badge shows how many there are.
-struct Problem: Identifiable, Hashable {
-    enum Kind { case nodeOffline, quorum, failedTask, storageFull }
-    var kind: Kind
-    var title: String
-    var detail: String
-    var id: String
-    var icon: String {
-        switch kind {
-        case .nodeOffline: return "server.rack"
-        case .quorum: return "exclamationmark.triangle.fill"
-        case .failedTask: return "xmark.octagon.fill"
-        case .storageFull: return "externaldrive.fill.badge.exclamationmark"
-        }
-    }
-}
-
 /// A task started from the app, followed until it finishes.
 struct TrackedTask: Identifiable, Hashable {
     var upid: String
@@ -59,6 +42,10 @@ final class Store: ObservableObject {
     @Published var notify: Bool { didSet { UserDefaults.standard.set(notify, forKey: "notify"); if notify { requestNotificationPermission() } } }
     @Published var storageWarning: Double { didSet { UserDefaults.standard.set(storageWarning, forKey: "storageWarning"); updateDock() } }
     @Published var menuBarShowsCount: Bool { didSet { UserDefaults.standard.set(menuBarShowsCount, forKey: "menuBarShowsCount") } }
+    /// SMART checks query every disk, which can wake disks in standby, so they run hourly and can be turned off.
+    @Published var checkDisks: Bool { didSet { UserDefaults.standard.set(checkDisks, forKey: "checkDisks"); slowChecksDone = nil } }
+    @Published var checkUpdates: Bool { didSet { UserDefaults.standard.set(checkUpdates, forKey: "checkUpdates"); slowChecksDone = nil } }
+    @Published var updatesAsProblem: Bool { didSet { UserDefaults.standard.set(updatesAsProblem, forKey: "updatesAsProblem"); updateDock() } }
 
     // Data
     @Published var nodes: [PVENode] = []
@@ -67,6 +54,15 @@ final class Store: ObservableObject {
     @Published var tasks: [PVETask] = []
     @Published var cluster: ClusterStatusEntry?
     @Published var version: PVEVersion?
+    @Published var zfsPools: [String: [ZFSPool]] = [:]
+    @Published var disks: [String: [NodeDisk]] = [:]
+    @Published var updates: [String: [AptPackage]] = [:]
+    /// Why updates can't be checked (e.g. the token lacks Sys.Modify), or nil
+    @Published var updatesUnavailable: String?
+    @Published var ceph: CephHealth?
+    /// "storage on node" for storage that isn't available on an online node
+    @Published var unavailableStorage: [String] = []
+    private var slowChecksDone: Date?
 
     // State
     @Published var isLoading = false
@@ -83,6 +79,7 @@ final class Store: ObservableObject {
     private var wakeObserver: NSObjectProtocol?
     private var knownFailedTasks: Set<String>?
     private var knownOfflineNodes: Set<String>?
+    private var knownHealthProblems: Set<String>?
 
     var api: ProxmoxAPI { ProxmoxAPI(baseURL: baseURL, tokenID: tokenID, secret: secret) }
     var isConfigured: Bool { api.isConfigured }
@@ -97,6 +94,9 @@ final class Store: ObservableObject {
         notify = d.object(forKey: "notify") as? Bool ?? true
         storageWarning = d.object(forKey: "storageWarning") as? Double ?? 0.9
         menuBarShowsCount = d.object(forKey: "menuBarShowsCount") as? Bool ?? true
+        checkDisks = d.object(forKey: "checkDisks") as? Bool ?? true
+        checkUpdates = d.object(forKey: "checkUpdates") as? Bool ?? true
+        updatesAsProblem = d.bool(forKey: "updatesAsProblem")
         CertificateTrust.shared.pinned = pinnedFingerprint
     }
 
@@ -122,8 +122,21 @@ final class Store: ObservableObject {
             out.append(Problem(kind: .storageFull, title: "Storage \(s.storage) is \(Fmt.percent(s.fraction)) full",
                                detail: "\(s.nodesLabel) · \(Fmt.bytes(s.total - s.used)) free", id: "storage-\(s.id)"))
         }
+        out += healthProblems
+        if updatesAsProblem {
+            for (node, list) in updates.sorted(by: { $0.key < $1.key }) where !list.isEmpty {
+                out.append(Problem(kind: .updates, title: "\(list.count) update(s) available on \(node)", detail: "", id: "updates-\(node)"))
+            }
+        }
         return out
     }
+
+    /// Problems from health checks: storage availability, ZFS, SMART, HA and Ceph.
+    var healthProblems: [Problem] {
+        Health.problems(unavailableStorage: unavailableStorage, zfsPools: zfsPools, disks: disks, guests: guests, ceph: ceph)
+    }
+
+    var totalUpdates: Int { updates.values.reduce(0) { $0 + $1.count } }
 
     /// "web (101)" for a VMID that belongs to a known guest.
     func guestName(_ vmid: String) -> String {
@@ -217,6 +230,7 @@ final class Store: ObservableObject {
             nodes = resources.compactMap(PVENode.init).sorted { $0.name < $1.name }
             guests = resources.compactMap(Guest.init).sorted { $0.vmid < $1.vmid }
             storages = PVEStorage.from(resources)
+            lastResources = resources
             untrustedFingerprint = nil
         } catch {
             errors.append(describe(error))
@@ -239,12 +253,71 @@ final class Store: ObservableObject {
                 for await list in group { all += list }
             }
             tasks = all.sorted { $0.starttime > $1.starttime }
+            await loadHealth(api: api, resources: lastResources)
             notifyChanges()
         }
 
         errorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
         lastUpdated = Date()
         updateDock()
+    }
+
+    private var lastResources: [ClusterResource] = []
+
+    /// ZFS, storage availability and Ceph on every refresh; SMART and updates at most hourly.
+    private func loadHealth(api: ProxmoxAPI, resources: [ClusterResource]) async {
+        let names = onlineNodes.map(\.name)
+        let online = Set(names)
+        unavailableStorage = Health.unavailableStorage(resources, onlineNodes: online)
+
+        var pools: [String: [ZFSPool]] = [:]
+        await withTaskGroup(of: (String, [ZFSPool]?).self) { group in
+            for n in names { group.addTask { (n, try? await api.zfsPools(node: n)) } }
+            for await (n, list) in group { if let list { pools[n] = list } }
+        }
+        zfsPools = pools
+
+        // Ceph only when the cluster uses Ceph storage
+        let usesCeph = Health.usesCeph(resources)
+        ceph = usesCeph ? try? await api.cephHealth() : nil
+
+        let due = slowChecksDone.map { Date().timeIntervalSince($0) > 3600 } ?? true
+        guard due else { return }
+        slowChecksDone = Date()
+
+        if checkDisks {
+            var found: [String: [NodeDisk]] = [:]
+            await withTaskGroup(of: (String, [NodeDisk]?).self) { group in
+                for n in names { group.addTask { (n, try? await api.disks(node: n)) } }
+                for await (n, list) in group { if let list { found[n] = list } }
+            }
+            disks = found
+        } else {
+            disks = [:]
+        }
+
+        if checkUpdates {
+            var found: [String: [AptPackage]] = [:]
+            var denied = false
+            await withTaskGroup(of: (String, Result<[AptPackage], Error>).self) { group in
+                for n in names {
+                    group.addTask {
+                        do { return (n, .success(try await api.updates(node: n))) } catch { return (n, .failure(error)) }
+                    }
+                }
+                for await (n, result) in group {
+                    switch result {
+                    case .success(let list): found[n] = list
+                    case .failure(let error): if case APIError.http(403, _) = error { denied = true }
+                    }
+                }
+            }
+            updates = found
+            updatesUnavailable = denied ? "The API token needs Sys.Modify on /nodes to read available updates." : nil
+        } else {
+            updates = [:]
+            updatesUnavailable = nil
+        }
     }
 
     private func describe(_ error: Error) -> String {
@@ -357,11 +430,17 @@ final class Store: ObservableObject {
     private func notifyChanges() {
         let failed = Set(failedTasks.map(\.upid))
         let offline = Set(nodes.filter { !$0.online }.map(\.name))
+        let health = healthProblems
         defer {
             knownFailedTasks = (knownFailedTasks ?? []).union(failed)
             knownOfflineNodes = offline
+            knownHealthProblems = Set(health.map(\.id))
         }
-        guard notify, canNotify, let knownFailed = knownFailedTasks, let knownOffline = knownOfflineNodes else { return }
+        guard notify, canNotify, let knownFailed = knownFailedTasks, let knownOffline = knownOfflineNodes,
+              let knownHealth = knownHealthProblems else { return }
+        for p in health where !knownHealth.contains(p.id) {
+            post(id: "\(p.id)-\(Date().timeIntervalSince1970)", title: p.title, body: p.detail.isEmpty ? "Open ProxmoxDock for details." : p.detail)
+        }
         for t in failedTasks where !knownFailed.contains(t.upid) && !tracked.contains(where: { $0.upid == t.upid }) {
             post(id: t.upid, title: "\(t.title) failed on \(t.node)", body: "\(t.objectID.isEmpty ? "" : guestName(t.objectID) + ": ")\(t.status ?? "")")
         }

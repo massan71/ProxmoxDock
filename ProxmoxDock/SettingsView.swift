@@ -72,8 +72,25 @@ struct SettingsView: View {
                 Picker("Warn when storage is fuller than", selection: $store.storageWarning) {
                     ForEach([0.8, 0.85, 0.9, 0.95], id: \.self) { Text(Fmt.percent($0)).tag($0) }
                 }
-                Text("The Dock badge counts problems: offline nodes, lost quorum, failed tasks in the last 24 hours and storage above this level.")
+                Text("The Dock badge counts problems: offline nodes, lost quorum, failed tasks in the last 24 hours, storage above this level or unavailable, unhealthy ZFS pools, disks failing SMART, HA errors and Ceph warnings.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Health Checks") {
+                Text("Checked on every refresh: storage availability, ZFS pools, HA state and Ceph (when used).")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Check disks' SMART health (hourly)", isOn: $store.checkDisks)
+                Text("Proxmox queries every disk, which can wake hard disks from standby.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Check for available updates (hourly)", isOn: $store.checkUpdates)
+                Toggle("Count available updates as a problem", isOn: $store.updatesAsProblem)
+                    .disabled(!store.checkUpdates)
+                if let reason = store.updatesUnavailable, store.checkUpdates {
+                    Text(reason).font(.caption).foregroundStyle(.orange)
+                } else {
+                    Text("Reads the list Proxmox refreshes itself; it doesn't run apt update. Needs Sys.Modify on /nodes.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             Section("Menu Bar and Dock") {

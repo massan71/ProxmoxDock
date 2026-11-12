@@ -399,3 +399,95 @@ enum Fmt {
     static func duration(_ seconds: Double) -> String { shortDurationFormatter.string(from: max(1, seconds)) ?? "" }
     static func percent(_ fraction: Double) -> String { "\(Int((fraction * 100).rounded()))%" }
 }
+
+// MARK: - Node health (ZFS, disks, updates, Ceph)
+
+/// GET /nodes/{node}/disks/zfs
+struct ZFSPool: Decodable, Identifiable, Hashable {
+    var name: String
+    var health: String
+    var size: Double
+    var alloc: Double
+    var free: Double
+    var frag: Double?
+    var id: String { name }
+    /// ONLINE is healthy; DEGRADED, FAULTED, UNAVAIL, SUSPENDED, OFFLINE and REMOVED need attention.
+    var isHealthy: Bool { health.uppercased() == "ONLINE" }
+    var fraction: Double { size > 0 ? alloc / size : 0 }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyCodingKey.self)
+        name = c.string("name") ?? ""
+        health = c.string("health") ?? "UNKNOWN"
+        size = c.double("size") ?? 0
+        alloc = c.double("alloc") ?? 0
+        free = c.double("free") ?? 0
+        frag = c.double("frag")
+    }
+}
+
+/// GET /nodes/{node}/disks/list
+struct NodeDisk: Decodable, Identifiable, Hashable {
+    var devpath: String
+    var health: String?
+    var model: String?
+    var serial: String?
+    var size: Double
+    var type: String?
+    var wearout: String?
+    var id: String { devpath }
+    /// SMART result: "PASSED"/"OK" healthy, "UNKNOWN"/missing means SMART isn't available.
+    var isFailing: Bool {
+        guard let h = health?.uppercased(), !h.isEmpty else { return false }
+        return !["PASSED", "OK", "UNKNOWN", "N/A"].contains(h)
+    }
+    var label: String { [model, devpath].compactMap { $0 }.joined(separator: " · ") }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyCodingKey.self)
+        devpath = c.string("devpath") ?? ""
+        health = c.string("health")
+        model = c.string("model")
+        serial = c.string("serial")
+        size = c.double("size") ?? 0
+        type = c.string("type")
+        wearout = c.string("wearout")
+    }
+}
+
+/// GET /nodes/{node}/apt/update (cached list of available updates; needs Sys.Modify)
+struct AptPackage: Decodable, Identifiable, Hashable {
+    var package: String
+    var version: String
+    var oldVersion: String?
+    var id: String { package }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyCodingKey.self)
+        package = c.string("Package") ?? ""
+        version = c.string("Version") ?? ""
+        oldVersion = c.string("OldVersion")
+    }
+}
+
+/// GET /cluster/ceph/status: only the overall health is used.
+struct CephHealth: Decodable {
+    var status: String     // HEALTH_OK, HEALTH_WARN, HEALTH_ERR
+    var summaries: [String]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyCodingKey.self)
+        struct Health: Decodable {
+            var status: String?
+            var checks: [String: Check]?
+            struct Check: Decodable {
+                var severity: String?
+                var summary: Summary?
+                struct Summary: Decodable { var message: String? }
+            }
+        }
+        let health = try? c.decodeIfPresent(Health.self, forKey: AnyCodingKey("health"))
+        status = health?.status ?? "UNKNOWN"
+        summaries = (health?.checks ?? [:]).values.compactMap { $0.summary?.message }.sorted()
+    }
+}

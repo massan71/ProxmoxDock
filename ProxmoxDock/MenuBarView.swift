@@ -65,6 +65,10 @@ struct MenuBarView: View {
                     MiniStat(value: "\(store.problems.count)", title: "Problems", tint: store.problems.isEmpty ? .green : .red)
                     MiniStat(value: "\(store.failedTasks.count)", title: "Failed tasks", tint: store.failedTasks.isEmpty ? .green : .red)
                 }
+                if store.totalUpdates > 0 && !store.updatesAsProblem {
+                    Label("\(store.totalUpdates) update(s) available", systemImage: "arrow.down.circle")
+                        .font(.caption).foregroundStyle(.blue)
+                }
                 if !store.problems.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(store.problems.prefix(5)) { p in
