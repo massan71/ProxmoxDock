@@ -6,11 +6,11 @@ A macOS Dock and menu bar app to monitor and manage a [Proxmox VE](https://www.p
 
 ## Features
 
-- **Dock icon badge** with the number of problems: offline nodes, lost quorum, failed tasks in the last 24 hours, storage above a threshold (90% by default) or unavailable, unhealthy ZFS pools, disks failing SMART, HA errors and Ceph warnings; `!` when the connection fails
+- **Dock icon badge** with the number of problems: offline nodes, lost quorum, failed tasks in the last 24 hours, storage above a threshold (90% by default) or unavailable, unhealthy ZFS pools, disks failing SMART, HA errors, Ceph warnings and guests without a recent backup or not in any backup job; `!` when the connection fails
 - **Dock menu** and optional **menu bar icon** with node status, running guests, problems and tasks in progress; the Dock icon can be hidden to use the app only from the menu bar
 - **Overview**: nodes online, running VMs/containers, problems, failed tasks, Ceph health, and per node CPU, memory, root disk, ZFS pools, SMART summary and available updates
-- **VMs & Containers**: status, ID, name, **IP addresses**, type, node, CPU, memory, uptime and tags, with search (also by IP) and filters; right-click to **start, shut down, reboot or stop** a guest, **copy its IP, SSH to it** in Terminal or **open it in the browser**
-- **Guest details** (double-click): power actions, **snapshots** (take, with or without RAM; roll back, optionally starting the guest; delete) and **backup now** (vzdump with zstd to a storage of your choice, snapshot/suspend/stop mode)
+- **VMs & Containers**: status, ID, name and tags, **IP addresses**, type, node, CPU, memory, uptime and **last backup**, with search (also by IP) and filters; right-click to **start, shut down, reboot or stop** a guest, **copy its IP, SSH to it** in Terminal or **open it in the browser**
+- **Guest details** (double-click): power actions, **snapshots** (take, with or without RAM; roll back, optionally starting the guest; delete), **backups** (list with date, storage, size, notes and PBS verification; protect, unprotect or delete) and **back up now** (vzdump with zstd to a storage of your choice, snapshot/suspend/stop mode)
 - **Performance charts** in their own windows: CPU, IO wait, load, memory and network for nodes; CPU, memory, network and disk I/O for VMs and containers — last hour, day, week, month or year, refreshed every minute, from Proxmox's own history (RRD)
 - **Consoles**: open a node's shell (xterm.js) or a VM (noVNC) or container (xterm.js) console in its own window — from the terminal button on a node, a guest's context menu or the guest details
 - **Storage**: usage of every storage, shared storage listed once
@@ -45,6 +45,10 @@ Requires macOS 14 or later (universal: Apple silicon and Intel) and Proxmox VE w
 ### Guest IP addresses
 
 VMs report their addresses through the **QEMU guest agent**: install `qemu-guest-agent` in the VM and enable *QEMU Guest Agent* under the VM's Options; the token needs **VM.GuestAgent.Audit** (**VM.Monitor** before Proxmox VE 9). Containers report their interfaces directly (**VM.Audit**). Loopback, link-local and container-runtime bridge addresses (Docker, Podman, Kubernetes) are left out, IPv4 first. Addresses refresh every 5 minutes and when you open a guest's details. "SSH to…" opens Terminal with the user name set in Settings (`root` by default).
+
+### Backups
+
+Every 30 minutes (and when you open a guest) ProxmoxDock lists the backups on every storage that holds them. A guest is reported when it isn't in any backup job (from Proxmox's own `not-backed-up` check) or when its newest backup is older than a threshold (7 days by default) — or it has never been backed up. Templates and guests tagged `nobackup` are skipped; the threshold, the job check and the tag are in **Settings → Backups**. Listing needs **Datastore.Audit** and the job check **Sys.Audit** (both in PVEAuditor); protecting a backup needs write access to the storage, deleting one **Datastore.Allocate** (or **VM.Backup** plus **Datastore.AllocateSpace**). Restoring is left to the Proxmox web interface.
 
 ### Performance charts
 

@@ -96,6 +96,17 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Backups") {
+                Picker("Warn when the last backup is older than", selection: $store.backupMaxAgeDays) {
+                    Text("Off").tag(0)
+                    ForEach([1, 2, 3, 7, 14, 30], id: \.self) { Text("\($0) day\($0 == 1 ? "" : "s")").tag($0) }
+                }
+                Toggle("Warn about VMs and containers not in any backup job", isOn: $store.warnNotCovered)
+                TextField("Ignore guests tagged", text: $store.backupIgnoreTag, prompt: Text("nobackup"))
+                Text("Templates and guests with this tag are never reported. Backups are listed every 30 minutes from every storage holding them; reading them needs Datastore.Audit, and the job check needs Sys.Audit.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Menu Bar and Dock") {
                 Toggle("Show in menu bar", isOn: $showMenuBar)
                 Toggle("Show problem count next to the icon", isOn: $store.menuBarShowsCount)

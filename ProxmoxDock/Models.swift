@@ -127,6 +127,15 @@ struct Guest: Identifiable, Hashable {
     var kindLabel: String { kind == .qemu ? "VM" : "CT" }
     var displayName: String { name.isEmpty ? "\(kindLabel) \(vmid)" : name }
 
+    // Display text for Table cells (kept out of the Table so it type-checks quickly)
+    var typeText: String { template ? "\(kindLabel) template" : kindLabel }
+    var cpuText: String { isRunning ? "\(Fmt.percent(cpu)) of \(Int(maxcpu))" : "—" }
+    var memText: String { isRunning ? "\(Fmt.bytes(mem)) / \(Fmt.bytes(maxmem))" : Fmt.bytes(maxmem) }
+    var uptimeText: String { isRunning ? Fmt.uptime(uptime) : "—" }
+    var tagsText: String { tags.joined(separator: ", ") }
+    var statusIcon: String { template ? "doc.on.doc" : (isRunning ? "play.circle.fill" : "stop.circle") }
+    var statusHelp: String { template ? "Template" : status.capitalized }
+
     // Sort helpers for Table columns
     var statusSort: Int { isRunning ? 1 : 0 }
     var cpuSort: Double { isRunning ? cpu : -1 }
@@ -605,4 +614,43 @@ enum RRDTimeframe: String, CaseIterable, Identifiable {
     case hour, day, week, month, year
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
+}
+
+// MARK: - Backups (GET /nodes/{node}/storage/{storage}/content?content=backup)
+
+struct BackupVolume: Decodable, Identifiable, Hashable {
+    var volid: String
+    var vmid: Int?
+    var ctime: Double
+    var size: Double?
+    var format: String
+    var notes: String
+    var protected: Bool
+    var verification: String?     // PBS: "ok" / "failed"
+    var storage = ""              // filled in by the client
+    var node = ""                 // node used to reach the storage
+    var id: String { volid }
+    var date: Date { ctime.asDate }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyCodingKey.self)
+        volid = c.string("volid") ?? ""
+        vmid = c.int("vmid")
+        ctime = c.double("ctime") ?? 0
+        size = c.double("size")
+        format = c.string("format") ?? ""
+        notes = c.string("notes") ?? ""
+        protected = c.bool("protected") ?? false
+        struct Verification: Decodable { var state: String? }
+        verification = (try? c.decodeIfPresent(Verification.self, forKey: AnyCodingKey("verification")))??.state
+    }
+}
+
+/// GET /cluster/backup-info/not-backed-up
+struct NotBackedUp: Decodable {
+    var vmid: Int
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyCodingKey.self)
+        vmid = c.int("vmid") ?? 0
+    }
 }

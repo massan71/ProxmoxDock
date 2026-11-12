@@ -46,6 +46,11 @@ final class Store: ObservableObject {
     @Published var checkDisks: Bool { didSet { UserDefaults.standard.set(checkDisks, forKey: "checkDisks"); slowChecksDone = nil } }
     @Published var checkUpdates: Bool { didSet { UserDefaults.standard.set(checkUpdates, forKey: "checkUpdates"); slowChecksDone = nil } }
     @Published var updatesAsProblem: Bool { didSet { UserDefaults.standard.set(updatesAsProblem, forKey: "updatesAsProblem"); updateDock() } }
+    /// Warn when a guest's newest backup is older than this many days (0: off)
+    @Published var backupMaxAgeDays: Int { didSet { UserDefaults.standard.set(backupMaxAgeDays, forKey: "backupMaxAgeDays"); updateDock() } }
+    /// Guests with this tag are ignored by the backup checks
+    @Published var backupIgnoreTag: String { didSet { UserDefaults.standard.set(backupIgnoreTag, forKey: "backupIgnoreTag"); updateDock() } }
+    @Published var warnNotCovered: Bool { didSet { UserDefaults.standard.set(warnNotCovered, forKey: "warnNotCovered"); updateDock() } }
     /// User name for "SSH to…" (empty: your macOS user name)
     @Published var sshUser: String { didSet { UserDefaults.standard.set(sshUser, forKey: "sshUser") } }
 
@@ -64,6 +69,11 @@ final class Store: ObservableObject {
     @Published var ceph: CephHealth?
     /// "storage on node" for storage that isn't available on an online node
     @Published var unavailableStorage: [String] = []
+    /// Backups by VMID, from every storage holding backups (refreshed every 30 minutes)
+    @Published var backups: [Int: [BackupVolume]] = [:]
+    /// VMIDs not in any backup job (nil: unknown, e.g. the token lacks Sys.Audit)
+    @Published var notCovered: Set<Int>?
+    @Published var backupScanned: Date?
     /// IP addresses of running guests, by guest ID (refreshed every 5 minutes)
     @Published var addresses: [String: GuestAddresses] = [:]
     private var slowChecksDone: Date?
@@ -102,6 +112,9 @@ final class Store: ObservableObject {
         checkUpdates = d.object(forKey: "checkUpdates") as? Bool ?? true
         updatesAsProblem = d.bool(forKey: "updatesAsProblem")
         sshUser = d.string(forKey: "sshUser") ?? "root"
+        backupMaxAgeDays = d.object(forKey: "backupMaxAgeDays") as? Int ?? 7
+        backupIgnoreTag = d.string(forKey: "backupIgnoreTag") ?? "nobackup"
+        warnNotCovered = d.object(forKey: "warnNotCovered") as? Bool ?? true
         CertificateTrust.shared.pinned = pinnedFingerprint
     }
 
@@ -139,7 +152,18 @@ final class Store: ObservableObject {
     /// Problems from health checks: storage availability, ZFS, SMART, HA and Ceph.
     var healthProblems: [Problem] {
         Health.problems(unavailableStorage: unavailableStorage, zfsPools: zfsPools, disks: disks, guests: guests, ceph: ceph)
+            + backupProblems
     }
+
+    /// Only once the backups have been scanned, so nothing is reported as "never backed up" too early.
+    var backupProblems: [Problem] {
+        guard backupScanned != nil else { return [] }
+        return Health.backupProblems(guests: guests, latest: latestBackup, notCovered: warnNotCovered ? notCovered : nil,
+                                     maxAgeDays: backupMaxAgeDays, ignoreTag: backupIgnoreTag)
+    }
+
+    /// Newest backup date per VMID.
+    var latestBackup: [Int: Date] { backups.compactMapValues { $0.map(\.date).max() } }
 
     var totalUpdates: Int { updates.values.reduce(0) { $0 + $1.count } }
 
@@ -260,6 +284,7 @@ final class Store: ObservableObject {
             tasks = all.sorted { $0.starttime > $1.starttime }
             await loadHealth(api: api, resources: lastResources)
             await loadAddresses(api: api)
+            await loadBackups(api: api)
             notifyChanges()
         }
 
@@ -293,6 +318,63 @@ final class Store: ObservableObject {
             }
         }
         addresses.merge(found) { _, new in new }
+    }
+
+    /// Lists the backups on every storage holding them (one online node per storage), at most every 30 minutes.
+    func loadBackups(api: ProxmoxAPI, force: Bool = false) async {
+        if !force, let last = backupScanned, Date().timeIntervalSince(last) < 1800 { return }
+        let online = Set(onlineNodes.map(\.name))
+        let sources: [(node: String, storage: String)] = storages
+            .filter { $0.available && $0.content.contains("backup") }
+            .compactMap { s in s.nodes.first(where: online.contains).map { ($0, s.storage) } }
+        var all: [BackupVolume] = []
+        var anyOK = sources.isEmpty
+        await withTaskGroup(of: [BackupVolume]?.self) { group in
+            for src in sources { group.addTask { try? await api.backups(node: src.node, storage: src.storage) } }
+            for await list in group {
+                if let list { all += list; anyOK = true }
+            }
+        }
+        notCovered = (try? await api.notBackedUp()).map { Set($0.map(\.vmid)) }
+        guard anyOK else { return }   // keep the previous list if every storage failed
+        backups = Dictionary(grouping: all.filter { $0.vmid != nil }, by: { $0.vmid! })
+            .mapValues { $0.sorted { $0.ctime > $1.ctime } }
+        backupScanned = Date()
+        updateDock()
+    }
+
+    /// Re-reads one guest's backups (e.g. when opening its details or after a backup).
+    func refreshBackups(of g: Guest) async {
+        let api = self.api
+        let online = Set(onlineNodes.map(\.name))
+        let sources: [(node: String, storage: String)] = storages
+            .filter { $0.available && $0.content.contains("backup") }
+            .compactMap { s in s.nodes.first(where: online.contains).map { ($0, s.storage) } }
+        var found: [BackupVolume] = []
+        for src in sources {
+            if let list = try? await api.backups(node: src.node, storage: src.storage, vmid: g.vmid) { found += list }
+        }
+        backups[g.vmid] = found.sorted { $0.ctime > $1.ctime }
+        updateDock()
+    }
+
+    func setProtected(_ b: BackupVolume, _ protected: Bool, of g: Guest) async {
+        do {
+            try await api.setProtected(b, protected)
+        } catch {
+            var message = "Could not \(protected ? "protect" : "unprotect") the backup: \(describe(error))"
+            if case APIError.http(403, _) = error { message += " The API token needs write access to /storage/\(b.storage)." }
+            errorMessage = message
+        }
+        await refreshBackups(of: g)
+    }
+
+    func deleteBackup(_ b: BackupVolume, of g: Guest) async {
+        await run("Delete backup of \(g.displayName)", node: b.node, guestID: g.id,
+                  privilege: "Datastore.Allocate on /storage/\(b.storage) (or VM.Backup on /vms/\(g.vmid) plus Datastore.AllocateSpace)") {
+            try await $0.deleteBackup(b)
+        }
+        await refreshBackups(of: g)
     }
 
     func refreshAddresses(of g: Guest) async {

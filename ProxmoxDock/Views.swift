@@ -383,46 +383,18 @@ struct GuestsView: View {
     }
 
     var body: some View {
+        // A Table block takes at most 10 columns, so tags are shown in the Name column
         Table(filtered, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("", value: \.statusSort) { g in
-                if store.isBusy(g) {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: g.template ? "doc.on.doc" : (g.isRunning ? "play.circle.fill" : "stop.circle"))
-                        .foregroundStyle(g.template ? Color.secondary : (g.isRunning ? Color.green : Color.secondary))
-                        .help(g.template ? "Template" : g.status.capitalized)
-                }
-            }.width(22)
+            TableColumn("", value: \.statusSort) { g in GuestStatusCell(guest: g) }.width(22)
             TableColumn("ID", value: \.vmid) { g in Text(String(g.vmid)).monospacedDigit() }.width(min: 44, ideal: 54)
-            TableColumn("Name", value: \.name) { g in
-                HStack(spacing: 6) {
-                    Text(g.displayName)
-                    if let lock = g.lock { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.orange).help("Locked: \(lock)") }
-                }
-            }
-            TableColumn("IP") { g in
-                if g.isRunning, let a = store.addresses[g.id] {
-                    Text(a.summary)
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(a.state == .ok ? Color.primary : Color.secondary)
-                        .help(a.help)
-                } else {
-                    Text("—").foregroundStyle(.tertiary)
-                }
-            }.width(min: 90, ideal: 130)
-            TableColumn("Type", value: \.kind.rawValue) { g in Text(g.template ? "\(g.kindLabel) template" : g.kindLabel) }
-                .width(min: 40, ideal: 70)
+            TableColumn("Name", value: \.name) { g in GuestNameCell(guest: g) }
+            TableColumn("IP") { g in GuestIPCell(guest: g) }.width(min: 90, ideal: 130)
+            TableColumn("Type", value: \.kind.rawValue) { g in Text(g.typeText) }.width(min: 40, ideal: 70)
             TableColumn("Node", value: \.node).width(min: 60, ideal: 90)
-            TableColumn("CPU", value: \.cpuSort) { g in
-                Text(g.isRunning ? "\(Fmt.percent(g.cpu)) of \(Int(g.maxcpu))" : "—").monospacedDigit()
-            }.width(min: 60, ideal: 80)
-            TableColumn("Memory", value: \.memSort) { g in
-                Text(g.isRunning ? "\(Fmt.bytes(g.mem)) / \(Fmt.bytes(g.maxmem))" : Fmt.bytes(g.maxmem)).monospacedDigit()
-            }.width(min: 110, ideal: 150)
-            TableColumn("Uptime", value: \.uptimeSort) { g in Text(g.isRunning ? Fmt.uptime(g.uptime) : "—") }
-                .width(min: 60, ideal: 80)
-            TableColumn("Tags") { g in Text(g.tags.joined(separator: ", ")).foregroundStyle(.secondary) }
-                .width(min: 60, ideal: 100)
+            TableColumn("CPU", value: \.cpuSort) { g in Text(g.cpuText).monospacedDigit() }.width(min: 60, ideal: 80)
+            TableColumn("Memory", value: \.memSort) { g in Text(g.memText).monospacedDigit() }.width(min: 110, ideal: 150)
+            TableColumn("Uptime", value: \.uptimeSort) { g in Text(g.uptimeText) }.width(min: 60, ideal: 80)
+            TableColumn("Last Backup") { g in LastBackupCell(guest: g) }.width(min: 70, ideal: 95)
         }
         .contextMenu(forSelectionType: Guest.ID.self) { ids in
             if ids.count == 1, let g = store.guests.first(where: { ids.contains($0.id) }), !g.template {
@@ -478,6 +450,72 @@ struct GuestsView: View {
                 ContentUnavailableView("No VMs or containers", systemImage: "shippingbox",
                                        description: Text("Or the API token can't see them: it needs VM.Audit."))
             }
+        }
+    }
+}
+
+/// Table cells kept as separate views so the guests Table type-checks quickly.
+struct GuestStatusCell: View {
+    let guest: Guest
+    @EnvironmentObject var store: Store
+
+    var body: some View {
+        if store.isBusy(guest) {
+            ProgressView().controlSize(.mini)
+        } else {
+            Image(systemName: guest.statusIcon)
+                .foregroundStyle(guest.isRunning && !guest.template ? Color.green : Color.secondary)
+                .help(guest.statusHelp)
+        }
+    }
+}
+
+struct GuestNameCell: View {
+    let guest: Guest
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(guest.displayName)
+            if !guest.tags.isEmpty {
+                Text(guest.tagsText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            if let lock = guest.lock {
+                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.orange).help("Locked: \(lock)")
+            }
+        }
+    }
+}
+
+struct GuestIPCell: View {
+    let guest: Guest
+    @EnvironmentObject var store: Store
+
+    var body: some View {
+        if guest.isRunning, let a = store.addresses[guest.id] {
+            Text(a.summary)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(a.state == .ok ? Color.primary : Color.secondary)
+                .help(a.help)
+        } else {
+            Text("—").foregroundStyle(.tertiary)
+        }
+    }
+}
+
+struct LastBackupCell: View {
+    let guest: Guest
+    @EnvironmentObject var store: Store
+
+    var body: some View {
+        if guest.template {
+            Text("—").foregroundStyle(.tertiary)
+        } else if let last = store.latestBackup[guest.vmid] {
+            let stale = store.backupMaxAgeDays > 0 && Date().timeIntervalSince(last) > Double(store.backupMaxAgeDays) * 86400
+            Text(Fmt.relative(last)).foregroundStyle(stale ? Color.orange : Color.primary).help(Fmt.dateTime(last))
+        } else if store.backupScanned != nil {
+            Text(store.notCovered?.contains(guest.vmid) == true ? "No job" : "Never").foregroundStyle(.orange)
+        } else {
+            Text("…").foregroundStyle(.tertiary)
         }
     }
 }

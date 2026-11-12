@@ -23,6 +23,9 @@ struct GuestDetailView: View {
     @State private var backupMode = ProxmoxAPI.BackupMode.snapshot
     @State private var backupNotes = "{{guestname}} – manual backup from ProxmoxDock"
     @State private var confirmBackup = false
+    @State private var tab = 0 // 0 snapshots, 1 backups
+    @State private var pendingDeleteBackup: BackupVolume?
+    @State private var confirmDeleteBackup = false
 
     private var guest: Guest? { store.guests.first { $0.id == guestID } }
 
@@ -31,9 +34,19 @@ struct GuestDetailView: View {
             if let g = guest {
                 header(g)
                 Divider()
-                snapshotSection(g)
-                Divider()
-                backupSection(g)
+                Picker("", selection: $tab) {
+                    Text("Snapshots").tag(0)
+                    Text("Backups\(store.backups[g.vmid].map { " (\($0.count))" } ?? "")").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                if tab == 0 {
+                    snapshotSection(g)
+                } else {
+                    backupList(g)
+                    Divider()
+                    backupSection(g)
+                }
             } else {
                 Text("This VM or container is no longer available.").foregroundStyle(.secondary)
             }
@@ -224,8 +237,74 @@ struct GuestDetailView: View {
     // MARK: Backup
 
     @ViewBuilder
+    private func backupList(_ g: Guest) -> some View {
+        let list = store.backups[g.vmid] ?? []
+        let ignored = g.tags.contains { $0.lowercased() == store.backupIgnoreTag.lowercased() }
+        HStack(spacing: 6) {
+            if store.notCovered?.contains(g.vmid) == true && !ignored {
+                Label("Not in any backup job", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            } else if let last = list.first {
+                let stale = store.backupMaxAgeDays > 0 && Date().timeIntervalSince(last.date) > Double(store.backupMaxAgeDays) * 86400
+                Label("Last backup \(Fmt.relative(last.date))", systemImage: stale ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(stale && !ignored ? Color.orange : Color.green)
+            } else if store.backupScanned != nil {
+                Label("No backups", systemImage: "exclamationmark.triangle.fill").foregroundStyle(ignored ? Color.secondary : Color.orange)
+            }
+            if ignored { Text("(tagged “\(store.backupIgnoreTag)”: not checked)").foregroundStyle(.secondary) }
+            Spacer()
+        }
+        .font(.callout)
+        if !list.isEmpty {
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(list) { b in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: b.protected ? "lock.fill" : "archivebox")
+                                .foregroundStyle(b.protected ? Color.accentColor : Color.secondary).frame(width: 18)
+                                .help(b.protected ? "Protected: not pruned or deleted" : "")
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(Fmt.dateTime(b.date)).font(.callout.weight(.medium))
+                                    Text(Fmt.relative(b.date)).font(.caption).foregroundStyle(.secondary)
+                                    if let v = b.verification {
+                                        Label(v == "ok" ? "Verified" : "Verify \(v)", systemImage: v == "ok" ? "checkmark.seal.fill" : "xmark.seal.fill")
+                                            .font(.caption).foregroundStyle(v == "ok" ? .green : .red)
+                                    }
+                                }
+                                Text([b.storage, b.size.map(Fmt.bytes), b.notes.isEmpty ? nil : b.notes].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                            Button {
+                                Task { await store.setProtected(b, !b.protected, of: g) }
+                            } label: { Image(systemName: b.protected ? "lock.open" : "lock") }
+                            .help(b.protected ? "Remove protection" : "Protect from pruning and deletion")
+                            Button(role: .destructive) {
+                                pendingDeleteBackup = b
+                                confirmDeleteBackup = true
+                            } label: { Image(systemName: "trash") }
+                            .help(b.protected ? "Remove the protection first" : "Delete backup")
+                            .disabled(b.protected || store.isBusy(g))
+                        }
+                        .padding(.vertical, 6)
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 170)
+            .confirmationDialog("Delete the backup of \(g.displayName) from \(pendingDeleteBackup.map { Fmt.dateTime($0.date) } ?? "")?",
+                                isPresented: $confirmDeleteBackup, presenting: pendingDeleteBackup) { b in
+                Button("Delete", role: .destructive) { Task { await store.deleteBackup(b, of: g) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { b in
+                Text("The backup is removed from \(b.storage). This can't be undone.")
+            }
+        }
+    }
+
+    @ViewBuilder
     private func backupSection(_ g: Guest) -> some View {
-        Text("Backup").font(.headline)
+        Text("Back Up Now").font(.headline)
         if backupStorages.isEmpty {
             Text("No storage with backup content is available on \(g.node) (or the token lacks Datastore.Audit).")
                 .font(.callout).foregroundStyle(.secondary)
@@ -267,6 +346,7 @@ struct GuestDetailView: View {
                                         privilege: "VM.Backup on /vms/\(g.vmid) and Datastore.AllocateSpace on /storage/\(storage)") {
                             try await $0.backup(g, storage: storage, mode: mode, notes: notes)
                         }
+                        await store.refreshBackups(of: g)
                     }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -284,6 +364,7 @@ struct GuestDetailView: View {
         if let g = guest, g.isRunning { await store.refreshAddresses(of: g) }
         await loadSnapshots()
         guard let g = guest else { return }
+        await store.refreshBackups(of: g)
         let storages = (try? await store.api.backupStorages(node: g.node)) ?? []
         backupStorages = storages.filter { $0.active && $0.enabled }
         if !backupStorages.contains(where: { $0.storage == backupStorage }) {

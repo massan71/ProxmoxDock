@@ -205,6 +205,7 @@ struct ProxmoxAPI {
         return obj?["data"] as? String ?? ""
     }
 
+    /// Encodes one path segment ("/" included, e.g. in backup volume IDs).
     private func enc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(.init(charactersIn: "/"))) ?? s }
 
     // MARK: Reading
@@ -243,6 +244,30 @@ struct ProxmoxAPI {
     /// The cached list of available updates (does not run apt update); needs Sys.Modify.
     func updates(node: String) async throws -> [AptPackage] { try await get("/nodes/\(enc(node))/apt/update") }
     func cephHealth() async throws -> CephHealth { try await get("/cluster/ceph/status") }
+
+    // MARK: Backups
+
+    /// Backups on one storage (optionally of one guest). Needs Datastore.Audit on the storage.
+    func backups(node: String, storage: String, vmid: Int? = nil) async throws -> [BackupVolume] {
+        var q = [URLQueryItem(name: "content", value: "backup")]
+        if let vmid { q.append(URLQueryItem(name: "vmid", value: String(vmid))) }
+        let list: [BackupVolume] = try await get("/nodes/\(enc(node))/storage/\(enc(storage))/content", query: q)
+        return list.map { var b = $0; b.storage = storage; b.node = node; return b }
+    }
+
+    /// Guests not included in any backup job. Needs Sys.Audit on "/".
+    func notBackedUp() async throws -> [NotBackedUp] { try await get("/cluster/backup-info/not-backed-up") }
+
+    /// PUT .../content/{volume} protected=0|1 (a protected backup isn't pruned or deleted).
+    func setProtected(_ b: BackupVolume, _ protected: Bool) async throws {
+        _ = try await send(try request("/nodes/\(enc(b.node))/storage/\(enc(b.storage))/content/\(enc(b.volid))",
+                                       method: "PUT", form: ["protected": protected ? "1" : "0"]))
+    }
+
+    /// DELETE .../content/{volume}; returns the task UPID.
+    func deleteBackup(_ b: BackupVolume) async throws -> String {
+        try await task("/nodes/\(enc(b.node))/storage/\(enc(b.storage))/content/\(enc(b.volid))", method: "DELETE")
+    }
 
     // MARK: Performance history
 

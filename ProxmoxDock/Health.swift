@@ -2,7 +2,7 @@ import Foundation
 
 /// Something that needs attention; the Dock badge shows how many there are.
 struct Problem: Identifiable, Hashable {
-    enum Kind { case nodeOffline, quorum, failedTask, storageFull, storageUnavailable, zfs, disk, ha, ceph, updates }
+    enum Kind { case nodeOffline, quorum, failedTask, storageFull, storageUnavailable, zfs, disk, ha, ceph, updates, backup }
     var kind: Kind
     var title: String
     var detail: String
@@ -19,6 +19,7 @@ struct Problem: Identifiable, Hashable {
         case .ha: return "arrow.triangle.2.circlepath"
         case .ceph: return "circle.hexagongrid"
         case .updates: return "arrow.down.circle"
+        case .backup: return "externaldrive.badge.timemachine"
         }
     }
 }
@@ -36,6 +37,32 @@ enum Health {
     /// Whether the cluster has Ceph storage (only then is Ceph's health queried).
     static func usesCeph(_ resources: [ClusterResource]) -> Bool {
         resources.contains { $0.type == "storage" && ["rbd", "cephfs"].contains($0.plugintype ?? "") }
+    }
+
+    /// Backup problems for guests (templates and guests with the ignore tag are skipped):
+    /// not in any backup job, or covered but with no backup newer than `maxAgeDays` (0 turns that off).
+    static func backupProblems(guests: [Guest], latest: [Int: Date], notCovered: Set<Int>?, maxAgeDays: Int,
+                               ignoreTag: String, now: Date = Date()) -> [Problem] {
+        let tag = ignoreTag.trimmingCharacters(in: .whitespaces).lowercased()
+        var out: [Problem] = []
+        for g in guests where !g.template && (tag.isEmpty || !g.tags.contains { $0.lowercased() == tag }) {
+            let name = "\(g.displayName) (\(g.vmid))"
+            if let notCovered, notCovered.contains(g.vmid) {
+                out.append(Problem(kind: .backup, title: "\(name) is not in any backup job", detail: g.node, id: "backup-job-\(g.id)"))
+                continue
+            }
+            guard maxAgeDays > 0 else { continue }
+            if let last = latest[g.vmid] {
+                let days = now.timeIntervalSince(last) / 86400
+                if days > Double(maxAgeDays) {
+                    out.append(Problem(kind: .backup, title: "\(name): last backup \(Int(days)) days ago",
+                                       detail: Fmt.dateTime(last), id: "backup-age-\(g.id)"))
+                }
+            } else {
+                out.append(Problem(kind: .backup, title: "\(name) has never been backed up", detail: g.node, id: "backup-none-\(g.id)"))
+            }
+        }
+        return out
     }
 
     static func problems(unavailableStorage: [String], zfsPools: [String: [ZFSPool]], disks: [String: [NodeDisk]],
