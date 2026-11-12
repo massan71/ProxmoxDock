@@ -212,24 +212,7 @@ struct OverviewView: View {
                              tint: store.failedTasks.isEmpty ? .green : .red)
                 }
 
-                if !store.problems.isEmpty {
-                    Text("Problems").font(.title3.bold())
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(store.problems) { p in
-                            HStack(alignment: .top, spacing: 10) {
-                                Image(systemName: p.icon).foregroundStyle(.red).frame(width: 20)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(p.title)
-                                    if !p.detail.isEmpty { Text(p.detail).font(.caption).foregroundStyle(.secondary) }
-                                }
-                                Spacer()
-                            }
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(.background.secondary))
-                }
+                if !store.allProblems.isEmpty { ProblemsSection() }
 
                 if let ceph = store.ceph {
                     HStack(spacing: 8) {
@@ -256,6 +239,73 @@ struct OverviewView: View {
                 }
             }
             .padding(20)
+        }
+    }
+}
+
+/// Problems with Dismiss / Dismiss All, and the dismissed ones (which can be restored).
+struct ProblemsSection: View {
+    @EnvironmentObject var store: Store
+    @State private var showDismissed = false
+
+    var body: some View {
+        let dismissed = store.dismissedProblems
+        HStack(alignment: .firstTextBaseline) {
+            Text("Problems").font(.title3.bold())
+            Spacer()
+            if !dismissed.isEmpty {
+                Button(showDismissed ? "Hide Dismissed" : "Show \(dismissed.count) Dismissed") { showDismissed.toggle() }
+                    .buttonStyle(.borderless)
+            }
+            if !store.problems.isEmpty {
+                Button("Dismiss All") { store.dismissAll() }
+                    .help("Hide every current problem from the badge until it goes away and comes back")
+            }
+        }
+        VStack(alignment: .leading, spacing: 8) {
+            if store.problems.isEmpty {
+                Label("No open problems", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+            ForEach(store.problems) { p in
+                ProblemRow(problem: p, dismissed: false)
+            }
+            if showDismissed && !dismissed.isEmpty {
+                Divider()
+                HStack {
+                    Text("Dismissed").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Restore All") { store.restoreDismissed() }.buttonStyle(.borderless).font(.caption)
+                }
+                ForEach(dismissed) { p in ProblemRow(problem: p, dismissed: true) }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.background.secondary))
+    }
+}
+
+struct ProblemRow: View {
+    let problem: Problem
+    let dismissed: Bool
+    @EnvironmentObject var store: Store
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: problem.icon).foregroundStyle(dismissed ? Color.secondary : Color.red).frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(problem.title).foregroundStyle(dismissed ? .secondary : .primary)
+                if !problem.detail.isEmpty { Text(problem.detail).font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            if dismissed {
+                Button("Restore") { store.dismissed.remove(problem.id); store.updateDock() }
+                    .buttonStyle(.borderless).font(.caption)
+            } else {
+                Button { store.dismiss(problem) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.borderless)
+                    .help("Dismiss: hide from the badge until it goes away and comes back")
+            }
         }
     }
 }
@@ -569,11 +619,12 @@ struct StorageView: View {
 struct TasksView: View {
     @EnvironmentObject var store: Store
     @State private var failedOnly = false
+    @State private var selection = Set<PVETask.ID>()
     @State private var sortOrder = [KeyPathComparator(\PVETask.startSort, order: .reverse)]
 
     var body: some View {
         let list = store.tasks.filter { !failedOnly || $0.isFailed }.sorted(using: sortOrder)
-        Table(list, sortOrder: $sortOrder) {
+        Table(list, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("", value: \.startSort) { t in
                 if t.isRunning {
                     ProgressView().controlSize(.mini)
@@ -591,6 +642,15 @@ struct TasksView: View {
             TableColumn("User", value: \.user).width(min: 80, ideal: 110)
             TableColumn("Status") { t in
                 Text(t.statusText).foregroundStyle(t.isFailed ? .red : .secondary).help(t.statusText)
+            }
+        }
+        .contextMenu(forSelectionType: PVETask.ID.self) { ids in
+            let failed = store.allProblems.filter { p in ids.contains { p.id == "task-\($0)" } }
+            let open = failed.filter { !store.dismissed.contains($0.id) }
+            if !open.isEmpty {
+                Button(open.count == 1 ? "Dismiss Problem" : "Dismiss \(open.count) Problems") { open.forEach(store.dismiss) }
+            } else if !failed.isEmpty {
+                Button("Restore Problem") { failed.forEach { store.dismissed.remove($0.id) }; store.updateDock() }
             }
         }
         .toolbar {

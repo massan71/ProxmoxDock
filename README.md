@@ -7,6 +7,7 @@ A macOS Dock and menu bar app to monitor and manage a [Proxmox VE](https://www.p
 ## Features
 
 - **Dock icon badge** with the number of problems: offline nodes, lost quorum, failed tasks in the last 24 hours, storage above a threshold (90% by default) or unavailable, unhealthy ZFS pools, disks failing SMART, HA errors, Ceph warnings and guests without a recent backup or not in any backup job; `!` when the connection fails
+- **Dismiss problems** you've seen (one, several or all, from the Overview, the Tasks list or the menu bar): they leave the badge until they go away, and count again if they come back; dismissed problems can be restored
 - **Dock menu** and optional **menu bar icon** with node status, running guests, problems and tasks in progress; the Dock icon can be hidden to use the app only from the menu bar
 - **Overview**: nodes online, running VMs/containers, problems, failed tasks, Ceph health, and per node CPU, memory, root disk, ZFS pools, SMART summary and available updates
 - **VMs & Containers**: status, ID, name and tags, **IP addresses**, type, node, CPU, memory, uptime and **last backup**, with search (also by IP) and filters; right-click to **start, shut down, reboot or stop** a guest, **copy its IP, SSH to it** in Terminal or **open it in the browser**

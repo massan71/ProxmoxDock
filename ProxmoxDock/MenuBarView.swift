@@ -72,7 +72,16 @@ struct MenuBarView: View {
                 if !store.problems.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(store.problems.prefix(5)) { p in
-                            Label(p.title, systemImage: p.icon).font(.caption).foregroundStyle(.red).lineLimit(1)
+                            HStack(spacing: 4) {
+                                Label(p.title, systemImage: p.icon).font(.caption).foregroundStyle(.red).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Button { store.dismiss(p) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                    .buttonStyle(.borderless)
+                                    .help("Dismiss")
+                            }
+                        }
+                        if store.problems.count > 1 {
+                            Button("Dismiss All") { store.dismissAll() }.buttonStyle(.borderless).font(.caption)
                         }
                     }
                 }

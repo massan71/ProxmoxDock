@@ -75,7 +75,7 @@ struct SettingsView: View {
                 Picker("Warn when storage is fuller than", selection: $store.storageWarning) {
                     ForEach([0.8, 0.85, 0.9, 0.95], id: \.self) { Text(Fmt.percent($0)).tag($0) }
                 }
-                Text("The Dock badge counts problems: offline nodes, lost quorum, failed tasks in the last 24 hours, storage above this level or unavailable, unhealthy ZFS pools, disks failing SMART, HA errors and Ceph warnings.")
+                Text("The Dock badge counts problems: offline nodes, lost quorum, failed tasks in the last 24 hours, storage above this level or unavailable, unhealthy ZFS pools, disks failing SMART, HA errors and Ceph warnings. A dismissed problem stays hidden until it goes away; if it comes back, it counts again.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

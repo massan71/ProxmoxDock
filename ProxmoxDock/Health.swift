@@ -39,6 +39,14 @@ enum Health {
         resources.contains { $0.type == "storage" && ["rbd", "cephfs"].contains($0.plugintype ?? "") }
     }
 
+    /// Dismissed problems stay hidden only while they last: once a problem is gone, its dismissal is
+    /// forgotten, so the same problem shows again if it comes back. Problems that couldn't be checked
+    /// this time (`unchecked` ID prefixes) keep their dismissal.
+    static func pruneDismissed(_ dismissed: Set<String>, current: [Problem], unchecked: [String] = []) -> Set<String> {
+        let ids = Set(current.map(\.id))
+        return dismissed.filter { id in ids.contains(id) || unchecked.contains { id.hasPrefix($0) } }
+    }
+
     /// Backup problems for guests (templates and guests with the ignore tag are skipped):
     /// not in any backup job, or covered but with no backup newer than `maxAgeDays` (0 turns that off).
     static func backupProblems(guests: [Guest], latest: [Int: Date], notCovered: Set<Int>?, maxAgeDays: Int,

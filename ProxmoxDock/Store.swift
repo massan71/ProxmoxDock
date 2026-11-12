@@ -74,6 +74,10 @@ final class Store: ObservableObject {
     /// VMIDs not in any backup job (nil: unknown, e.g. the token lacks Sys.Audit)
     @Published var notCovered: Set<Int>?
     @Published var backupScanned: Date?
+    /// IDs of problems the user dismissed (persisted; forgotten once the problem is gone)
+    @Published var dismissed: Set<String> {
+        didSet { UserDefaults.standard.set(Array(dismissed), forKey: "dismissedProblems") }
+    }
     /// IP addresses of running guests, by guest ID (refreshed every 5 minutes)
     @Published var addresses: [String: GuestAddresses] = [:]
     private var slowChecksDone: Date?
@@ -115,6 +119,7 @@ final class Store: ObservableObject {
         backupMaxAgeDays = d.object(forKey: "backupMaxAgeDays") as? Int ?? 7
         backupIgnoreTag = d.string(forKey: "backupIgnoreTag") ?? "nobackup"
         warnNotCovered = d.object(forKey: "warnNotCovered") as? Bool ?? true
+        dismissed = Set(d.stringArray(forKey: "dismissedProblems") ?? [])
         CertificateTrust.shared.pinned = pinnedFingerprint
     }
 
@@ -124,7 +129,26 @@ final class Store: ObservableObject {
     var onlineNodes: [PVENode] { nodes.filter(\.online) }
     var failedTasks: [PVETask] { tasks.filter(\.isFailed) }
 
-    var problems: [Problem] {
+    /// Problems the user hasn't dismissed; the Dock badge counts these.
+    var problems: [Problem] { allProblems.filter { !dismissed.contains($0.id) } }
+    var dismissedProblems: [Problem] { allProblems.filter { dismissed.contains($0.id) } }
+
+    func dismiss(_ p: Problem) {
+        dismissed.insert(p.id)
+        updateDock()
+    }
+
+    func dismissAll() {
+        dismissed.formUnion(allProblems.map(\.id))
+        updateDock()
+    }
+
+    func restoreDismissed() {
+        dismissed = []
+        updateDock()
+    }
+
+    var allProblems: [Problem] {
         var out: [Problem] = []
         for n in nodes where !n.online {
             out.append(Problem(kind: .nodeOffline, title: "Node \(n.name) is offline", detail: "", id: "node-\(n.name)"))
@@ -288,6 +312,11 @@ final class Store: ObservableObject {
             notifyChanges()
         }
 
+        if errors.isEmpty {
+            // Backups that haven't been listed yet keep their dismissal
+            let pruned = Health.pruneDismissed(dismissed, current: allProblems, unchecked: backupScanned == nil ? ["backup-"] : [])
+            if pruned != dismissed { dismissed = pruned }
+        }
         errorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
         lastUpdated = Date()
         updateDock()
