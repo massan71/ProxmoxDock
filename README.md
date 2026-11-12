@@ -11,6 +11,7 @@ A macOS Dock and menu bar app to monitor and manage a [Proxmox VE](https://www.p
 - **Overview**: nodes online, running VMs/containers, problems, failed tasks, and CPU, memory and root disk usage per node
 - **VMs & Containers**: status, ID, name, type, node, CPU, memory, uptime and tags, with search and filters; right-click to **start, shut down, reboot or stop** a guest
 - **Guest details** (double-click): power actions, **snapshots** (take, with or without RAM; roll back, optionally starting the guest; delete) and **backup now** (vzdump with zstd to a storage of your choice, snapshot/suspend/stop mode)
+- **Consoles**: open a node's shell (xterm.js) or a VM (noVNC) or container (xterm.js) console in its own window — from the terminal button on a node, a guest's context menu or the guest details
 - **Storage**: usage of every storage, shared storage listed once
 - **Tasks**: tasks of the last 24 hours, with failed ones highlighted; tasks started from the app show their progress until they finish
 - Notifications for failed tasks and nodes going offline
@@ -40,9 +41,13 @@ Requires macOS 14 or later (universal: Apple silicon and Intel) and Proxmox VE w
 3. In ProxmoxDock open **Settings** (⌘,), enter the server URL (port 8006 is added if missing), token ID and secret, then click **Save and Test**.
 4. Allow ProxmoxDock to access the local network when macOS asks.
 
+### Consoles
+
+Proxmox doesn't allow API tokens to open consoles, so the console window shows the Proxmox login page the first time: log in with your Proxmox user (for example `root`, realm *Linux PAM*) and the console opens right after. The login ticket is kept for about two hours, so later consoles open directly. The password is handled by the Proxmox page itself; ProxmoxDock never sees or stores it. The user needs the console privileges (**VM.Console** for guests, **Sys.Console** for node shells). Each console window also has **Open in Browser**.
+
 ### Certificates
 
-Proxmox uses a self-signed certificate by default. ProxmoxDock accepts certificates that macOS trusts (e.g. Let's Encrypt); for any other certificate it shows the SHA-256 fingerprint in Settings so you can compare it with the one in the Proxmox web interface (node → System → Certificates, `pve-ssl.pem`) before clicking **Trust This Certificate**. Only that exact certificate is then accepted; if it changes, you're asked again. The token is only ever sent over HTTPS, and the secret is stored in the Keychain.
+Proxmox uses a self-signed certificate by default. ProxmoxDock accepts certificates that macOS trusts (e.g. Let's Encrypt); for any other certificate it shows the SHA-256 fingerprint in Settings so you can compare it with the one in the Proxmox web interface (node → System → Certificates, `pve-ssl.pem`) before clicking **Trust This Certificate**. Only that exact certificate is then accepted — by the API client and by console windows — and if it changes, you're asked again. The token is only ever sent over HTTPS, and the secret is stored in the Keychain.
 
 ## Building
 
@@ -76,6 +81,7 @@ Sets the version, builds a clean universal Release, zips and verifies it, then a
 | `ProxmoxDock/Views.swift` | Main window: overview, guests, storage, tasks |
 | `ProxmoxDock/GuestDetailView.swift` | Power, snapshots and backup for one guest |
 | `ProxmoxDock/SettingsView.swift` | Settings, including certificate review |
+| `ProxmoxDock/ConsoleView.swift` | Console windows: login when needed, then noVNC or xterm.js |
 | `ProxmoxDock/MenuBarView.swift` | Menu bar icon and panel |
 | `ProxmoxDock/App.swift` | Entry point and Dock menu |
 | `ProxmoxDock/AppPresence.swift` | Open at login and Dock icon visibility |

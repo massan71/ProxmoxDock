@@ -27,6 +27,16 @@ struct ProxmoxDockApp: App {
                 .environmentObject(store)
         }
 
+        // One window per console (node shell, VM or container)
+        WindowGroup("Console", id: "console", for: ConsoleTarget.self) { $target in
+            if let target {
+                ConsoleWindow(target: target)
+                    .environmentObject(store)
+            }
+        }
+        .defaultSize(width: 1024, height: 700)
+        .commandsRemoved() // no "New Console Window" menu item: consoles open from a node or guest
+
         MenuBarExtra(isInserted: $showMenuBar) {
             MenuBarView()
                 .environmentObject(store)

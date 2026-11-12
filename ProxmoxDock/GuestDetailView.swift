@@ -5,6 +5,7 @@ struct GuestDetailView: View {
     let guestID: String
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
 
     @State private var snapshots: [PVESnapshot] = []
     @State private var loadingSnapshots = false
@@ -92,6 +93,10 @@ struct GuestDetailView: View {
                     }
                 } label: { Label(action.title, systemImage: action.icon) }
                 .disabled((action == .start) == g.isRunning || store.isBusy(g))
+            }
+            Spacer()
+            Button { openWindow(id: "console", value: ConsoleTarget.guest(g)) } label: {
+                Label("Console", systemImage: "terminal")
             }
         }
         .confirmationDialog(pendingPower.map { "\($0.title) \(g.displayName)?" } ?? "", isPresented: $confirmPower, presenting: pendingPower) { action in

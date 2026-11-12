@@ -251,6 +251,7 @@ struct OverviewView: View {
 struct NodeCard: View {
     let node: PVENode
     @EnvironmentObject var store: Store
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let guests = store.guests.filter { $0.node == node.name && !$0.template }
@@ -260,6 +261,13 @@ struct NodeCard: View {
                 Text(node.name).font(.headline)
                 Spacer()
                 Text(node.online ? "Up \(Fmt.uptime(node.uptime))" : "Offline").font(.caption).foregroundStyle(.secondary)
+                if node.online {
+                    Button { openWindow(id: "console", value: ConsoleTarget.node(node.name)) } label: {
+                        Image(systemName: "terminal")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Open \(node.name)'s shell")
+                }
             }
             if node.online {
                 UsageBar(title: "CPU (\(Int(node.maxcpu)) cores)", fraction: node.cpu, detail: Fmt.percent(node.cpu))
@@ -280,6 +288,7 @@ struct NodeCard: View {
 
 struct GuestsView: View {
     @EnvironmentObject var store: Store
+    @Environment(\.openWindow) private var openWindow
     @State private var search = ""
     @State private var filter = 0 // 0 all, 1 running, 2 stopped
     @State private var selection = Set<Guest.ID>()
@@ -345,6 +354,9 @@ struct GuestsView: View {
                         .disabled((action == .start) == g.isRunning || store.isBusy(g))
                 }
                 Divider()
+                Button { openWindow(id: "console", value: ConsoleTarget.guest(g)) } label: {
+                    Label("Open Console", systemImage: "terminal")
+                }
                 Button("Snapshots & Backup…") { detail = g }
             }
         } primaryAction: { ids in
