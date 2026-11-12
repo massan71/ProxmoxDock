@@ -46,6 +46,8 @@ final class Store: ObservableObject {
     @Published var checkDisks: Bool { didSet { UserDefaults.standard.set(checkDisks, forKey: "checkDisks"); slowChecksDone = nil } }
     @Published var checkUpdates: Bool { didSet { UserDefaults.standard.set(checkUpdates, forKey: "checkUpdates"); slowChecksDone = nil } }
     @Published var updatesAsProblem: Bool { didSet { UserDefaults.standard.set(updatesAsProblem, forKey: "updatesAsProblem"); updateDock() } }
+    /// User name for "SSH to…" (empty: your macOS user name)
+    @Published var sshUser: String { didSet { UserDefaults.standard.set(sshUser, forKey: "sshUser") } }
 
     // Data
     @Published var nodes: [PVENode] = []
@@ -62,6 +64,8 @@ final class Store: ObservableObject {
     @Published var ceph: CephHealth?
     /// "storage on node" for storage that isn't available on an online node
     @Published var unavailableStorage: [String] = []
+    /// IP addresses of running guests, by guest ID (refreshed every 5 minutes)
+    @Published var addresses: [String: GuestAddresses] = [:]
     private var slowChecksDone: Date?
 
     // State
@@ -97,6 +101,7 @@ final class Store: ObservableObject {
         checkDisks = d.object(forKey: "checkDisks") as? Bool ?? true
         checkUpdates = d.object(forKey: "checkUpdates") as? Bool ?? true
         updatesAsProblem = d.bool(forKey: "updatesAsProblem")
+        sshUser = d.string(forKey: "sshUser") ?? "root"
         CertificateTrust.shared.pinned = pinnedFingerprint
     }
 
@@ -254,6 +259,7 @@ final class Store: ObservableObject {
             }
             tasks = all.sorted { $0.starttime > $1.starttime }
             await loadHealth(api: api, resources: lastResources)
+            await loadAddresses(api: api)
             notifyChanges()
         }
 
@@ -263,6 +269,35 @@ final class Store: ObservableObject {
     }
 
     private var lastResources: [ClusterResource] = []
+
+    /// Reads the IPs of running guests whose addresses are older than 5 minutes (6 requests at a time).
+    func loadAddresses(api: ProxmoxAPI, force: Bool = false) async {
+        let running = runningGuests
+        let ids = Set(running.map(\.id))
+        addresses = addresses.filter { ids.contains($0.key) }
+        let due = running.filter { g in
+            force || (addresses[g.id].map { Date().timeIntervalSince($0.fetched) > 300 } ?? true)
+        }
+        guard !due.isEmpty else { return }
+        var found: [String: GuestAddresses] = [:]
+        await withTaskGroup(of: (String, GuestAddresses).self) { group in
+            var queue = due.makeIterator()
+            func addNext() {
+                guard let g = queue.next() else { return }
+                group.addTask { (g.id, await api.addresses(g)) }
+            }
+            for _ in 0..<6 { addNext() }
+            for await (id, result) in group {
+                found[id] = result
+                addNext()
+            }
+        }
+        addresses.merge(found) { _, new in new }
+    }
+
+    func refreshAddresses(of g: Guest) async {
+        addresses[g.id] = await api.addresses(g)
+    }
 
     /// ZFS, storage availability and Ceph on every refresh; SMART and updates at most hourly.
     private func loadHealth(api: ProxmoxAPI, resources: [ClusterResource]) async {

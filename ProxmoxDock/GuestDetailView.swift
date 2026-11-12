@@ -78,6 +78,7 @@ struct GuestDetailView: View {
                     if let lock = g.lock { Text("· locked (\(lock))").foregroundStyle(.orange) }
                 }
                 .font(.callout)
+                addressRow(g)
             }
             Spacer()
             if store.isBusy(g) { ProgressView().controlSize(.small) }
@@ -106,6 +107,30 @@ struct GuestDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: { action in
             Text(PowerCopy.message(action, g))
+        }
+    }
+
+    @ViewBuilder
+    private func addressRow(_ g: Guest) -> some View {
+        if g.isRunning, let a = store.addresses[g.id] {
+            if a.addresses.isEmpty {
+                Text(a.state == .ok ? "No IP address reported" : a.summary)
+                    .font(.caption).foregroundStyle(.secondary).help(a.help)
+            } else {
+                HStack(spacing: 6) {
+                    ForEach(a.addresses.prefix(4), id: \.self) { ip in
+                        Menu {
+                            GuestConnectMenu(addresses: [ip], sshUser: store.sshUser)
+                        } label: {
+                            Text(ip).font(.system(.caption, design: .monospaced))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .help("Copy, SSH or open \(ip)")
+                    }
+                    if a.addresses.count > 4 { Text("+\(a.addresses.count - 4)").font(.caption).foregroundStyle(.secondary) }
+                }
+            }
         }
     }
 
@@ -253,6 +278,7 @@ struct GuestDetailView: View {
     // MARK: Loading
 
     private func loadAll() async {
+        if let g = guest, g.isRunning { await store.refreshAddresses(of: g) }
         await loadSnapshots()
         guard let g = guest else { return }
         let storages = (try? await store.api.backupStorages(node: g.node)) ?? []

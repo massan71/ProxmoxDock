@@ -491,3 +491,84 @@ struct CephHealth: Decodable {
         summaries = (health?.checks ?? [:]).values.compactMap { $0.summary?.message }.sorted()
     }
 }
+
+// MARK: - Guest IP addresses
+
+/// IP addresses of a running guest, from the QEMU guest agent (VMs) or the container's interfaces.
+struct GuestAddresses: Hashable {
+    enum State: Hashable {
+        case ok
+        case noAgent            // VM without a running QEMU guest agent
+        case denied(String)     // the token lacks the privilege named here
+        case failed(String)
+    }
+    var addresses: [String]     // IPv4 first, then IPv6; no loopback or link-local
+    var state: State
+    var fetched: Date
+
+    var primary: String? { addresses.first }
+    var summary: String {
+        switch state {
+        case .ok: return addresses.isEmpty ? "—" : (addresses.count > 1 ? "\(addresses[0]) +\(addresses.count - 1)" : addresses[0])
+        case .noAgent: return "No agent"
+        case .denied: return "No permission"
+        case .failed: return "—"
+        }
+    }
+    var help: String {
+        switch state {
+        case .ok: return addresses.isEmpty ? "No IP address reported" : addresses.joined(separator: "\n")
+        case .noAgent: return "The QEMU guest agent isn't running in this VM: install qemu-guest-agent in the guest and enable it under Options → QEMU Guest Agent."
+        case .denied(let privilege): return "The API token needs \(privilege) to read this guest's IP addresses."
+        case .failed(let message): return message
+        }
+    }
+
+    /// Keeps routable addresses: drops loopback, link-local, and IPv6 before IPv4 ordering.
+    static func clean(_ raw: [String]) -> [String] {
+        var seen = Set<String>()
+        let addrs = raw.map { $0.split(separator: "/").first.map(String.init) ?? $0 }
+            .filter { a in
+                let l = a.lowercased()
+                return !l.isEmpty && !l.hasPrefix("127.") && l != "::1" && !l.hasPrefix("fe80") && !l.hasPrefix("169.254.")
+            }
+            .filter { seen.insert($0).inserted }
+        return addrs.filter { !$0.contains(":") } + addrs.filter { $0.contains(":") }
+    }
+}
+
+/// One interface from the QEMU guest agent or from /lxc/{vmid}/interfaces.
+struct GuestInterface: Decodable {
+    var name: String
+    var addresses: [String]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyCodingKey.self)
+        name = c.string("name") ?? ""
+        struct Addr: Decodable {
+            var ip: String?
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: AnyCodingKey.self)
+                ip = c.string("ip-address")
+            }
+        }
+        var list = ((try? c.decodeIfPresent([Addr].self, forKey: AnyCodingKey("ip-addresses"))) ?? nil)?.compactMap(\.ip) ?? []
+        // Containers also report "inet"/"inet6" as "address/prefix" strings (possibly several, space separated)
+        for key in ["inet", "inet6"] {
+            if let s = c.string(key) { list += s.split(separator: " ").map(String.init) }
+        }
+        addresses = list
+    }
+
+    /// Loopback and container-runtime bridges (Docker, Podman, libvirt, Kubernetes CNIs) whose
+    /// addresses are internal to the guest and not useful to connect to.
+    var isInternal: Bool {
+        let n = name.lowercased()
+        return n == "lo" || ["docker", "br-", "veth", "virbr", "cni", "flannel", "cali", "podman", "lxcbr", "kube"].contains { n.hasPrefix($0) }
+    }
+}
+
+/// The guest agent wraps its answer: {"result": [interfaces]}
+struct AgentInterfaces: Decodable {
+    var result: [GuestInterface]
+}

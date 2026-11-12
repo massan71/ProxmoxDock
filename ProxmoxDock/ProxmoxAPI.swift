@@ -244,6 +244,33 @@ struct ProxmoxAPI {
     func updates(node: String) async throws -> [AptPackage] { try await get("/nodes/\(enc(node))/apt/update") }
     func cephHealth() async throws -> CephHealth { try await get("/cluster/ceph/status") }
 
+    // MARK: Guest IP addresses
+
+    /// IPs of a running guest. VMs need the QEMU guest agent and VM.GuestAgent.Audit
+    /// (VM.Monitor before Proxmox VE 9); containers need VM.Audit.
+    func addresses(_ g: Guest) async -> GuestAddresses {
+        do {
+            let interfaces: [GuestInterface]
+            if g.kind == .qemu {
+                let agent: AgentInterfaces = try await get("/nodes/\(enc(g.node))/qemu/\(g.vmid)/agent/network-get-interfaces")
+                interfaces = agent.result
+            } else {
+                interfaces = try await get("/nodes/\(enc(g.node))/lxc/\(g.vmid)/interfaces")
+            }
+            let raw = interfaces.filter { !$0.isInternal }.flatMap(\.addresses)
+            return GuestAddresses(addresses: GuestAddresses.clean(raw), state: .ok, fetched: Date())
+        } catch APIError.http(403, _) {
+            let privilege = g.kind == .qemu ? "VM.GuestAgent.Audit (VM.Monitor before Proxmox VE 9)" : "VM.Audit"
+            return GuestAddresses(addresses: [], state: .denied(privilege), fetched: Date())
+        } catch APIError.http(let code, let msg) where g.kind == .qemu && (code == 500 || code == 596) {
+            // "QEMU guest agent is not running" / "No QEMU guest agent configured"
+            _ = msg
+            return GuestAddresses(addresses: [], state: .noAgent, fetched: Date())
+        } catch {
+            return GuestAddresses(addresses: [], state: .failed(error.localizedDescription), fetched: Date())
+        }
+    }
+
     // MARK: Actions (each starts a task and returns its UPID)
 
     enum PowerAction: String, CaseIterable, Identifiable {

@@ -69,6 +69,9 @@ struct SettingsView: View {
                     ForEach([1, 2, 5, 10, 15, 30], id: \.self) { Text("\($0) min").tag($0) }
                 }
                 Toggle("Notify about failed tasks and offline nodes", isOn: $store.notify)
+                TextField("SSH user name", text: $store.sshUser, prompt: Text("your macOS user name"))
+                Text("Used by “SSH to…” on a guest's IP address. IPs come from the QEMU guest agent (VMs) or the container's interfaces, refreshed every 5 minutes.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("Warn when storage is fuller than", selection: $store.storageWarning) {
                     ForEach([0.8, 0.85, 0.9, 0.95], id: \.self) { Text(Fmt.percent($0)).tag($0) }
                 }

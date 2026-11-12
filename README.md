@@ -9,7 +9,7 @@ A macOS Dock and menu bar app to monitor and manage a [Proxmox VE](https://www.p
 - **Dock icon badge** with the number of problems: offline nodes, lost quorum, failed tasks in the last 24 hours, storage above a threshold (90% by default) or unavailable, unhealthy ZFS pools, disks failing SMART, HA errors and Ceph warnings; `!` when the connection fails
 - **Dock menu** and optional **menu bar icon** with node status, running guests, problems and tasks in progress; the Dock icon can be hidden to use the app only from the menu bar
 - **Overview**: nodes online, running VMs/containers, problems, failed tasks, Ceph health, and per node CPU, memory, root disk, ZFS pools, SMART summary and available updates
-- **VMs & Containers**: status, ID, name, type, node, CPU, memory, uptime and tags, with search and filters; right-click to **start, shut down, reboot or stop** a guest
+- **VMs & Containers**: status, ID, name, **IP addresses**, type, node, CPU, memory, uptime and tags, with search (also by IP) and filters; right-click to **start, shut down, reboot or stop** a guest, **copy its IP, SSH to it** in Terminal or **open it in the browser**
 - **Guest details** (double-click): power actions, **snapshots** (take, with or without RAM; roll back, optionally starting the guest; delete) and **backup now** (vzdump with zstd to a storage of your choice, snapshot/suspend/stop mode)
 - **Consoles**: open a node's shell (xterm.js) or a VM (noVNC) or container (xterm.js) console in its own window — from the terminal button on a node, a guest's context menu or the guest details
 - **Storage**: usage of every storage, shared storage listed once
@@ -40,6 +40,10 @@ Requires macOS 14 or later (universal: Apple silicon and Intel) and Proxmox VE w
    - power actions: **VM.PowerMgmt**; snapshots: **VM.Snapshot** (and **VM.Snapshot.Rollback**); backups: **VM.Backup** plus **Datastore.AllocateSpace** on the backup storage — for example the **PVEVMAdmin** role on `/vms` and **PVEDatastoreUser** on the backup storage
 3. In ProxmoxDock open **Settings** (⌘,), enter the server URL (port 8006 is added if missing), token ID and secret, then click **Save and Test**.
 4. Allow ProxmoxDock to access the local network when macOS asks.
+
+### Guest IP addresses
+
+VMs report their addresses through the **QEMU guest agent**: install `qemu-guest-agent` in the VM and enable *QEMU Guest Agent* under the VM's Options; the token needs **VM.GuestAgent.Audit** (**VM.Monitor** before Proxmox VE 9). Containers report their interfaces directly (**VM.Audit**). Loopback, link-local and container-runtime bridge addresses (Docker, Podman, Kubernetes) are left out, IPv4 first. Addresses refresh every 5 minutes and when you open a guest's details. "SSH to…" opens Terminal with the user name set in Settings (`root` by default).
 
 ### Health checks
 
@@ -86,6 +90,7 @@ Sets the version, builds a clean universal Release, zips and verifies it, then a
 | `ProxmoxDock/Views.swift` | Main window: overview, guests, storage, tasks |
 | `ProxmoxDock/GuestDetailView.swift` | Power, snapshots and backup for one guest |
 | `ProxmoxDock/SettingsView.swift` | Settings, including certificate review |
+| `ProxmoxDock/GuestConnect.swift` | Copy, SSH and browser shortcuts for guest IPs |
 | `ProxmoxDock/ConsoleView.swift` | Console windows: login when needed, then noVNC or xterm.js |
 | `ProxmoxDock/MenuBarView.swift` | Menu bar icon and panel |
 | `ProxmoxDock/App.swift` | Entry point and Dock menu |

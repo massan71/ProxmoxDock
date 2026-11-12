@@ -362,7 +362,8 @@ struct GuestsView: View {
         store.guests.filter { g in
             (filter == 0 || (filter == 1) == g.isRunning) &&
             (search.isEmpty || g.displayName.localizedCaseInsensitiveContains(search) || String(g.vmid).contains(search)
-                || g.node.localizedCaseInsensitiveContains(search) || g.tags.contains { $0.localizedCaseInsensitiveContains(search) })
+                || g.node.localizedCaseInsensitiveContains(search) || g.tags.contains { $0.localizedCaseInsensitiveContains(search) }
+                || (store.addresses[g.id]?.addresses.contains { $0.contains(search) } ?? false))
         }
         .sorted(using: sortOrder)
     }
@@ -394,6 +395,16 @@ struct GuestsView: View {
                     if let lock = g.lock { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.orange).help("Locked: \(lock)") }
                 }
             }
+            TableColumn("IP") { g in
+                if g.isRunning, let a = store.addresses[g.id] {
+                    Text(a.summary)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(a.state == .ok ? Color.primary : Color.secondary)
+                        .help(a.help)
+                } else {
+                    Text("—").foregroundStyle(.tertiary)
+                }
+            }.width(min: 90, ideal: 130)
             TableColumn("Type", value: \.kind.rawValue) { g in Text(g.template ? "\(g.kindLabel) template" : g.kindLabel) }
                 .width(min: 40, ideal: 70)
             TableColumn("Node", value: \.node).width(min: 60, ideal: 90)
@@ -418,12 +429,17 @@ struct GuestsView: View {
                 Button { openWindow(id: "console", value: ConsoleTarget.guest(g)) } label: {
                     Label("Open Console", systemImage: "terminal")
                 }
+                if let ips = store.addresses[g.id]?.addresses, g.isRunning, !ips.isEmpty {
+                    Divider()
+                    GuestConnectMenu(addresses: ips, sshUser: store.sshUser)
+                }
                 Button("Snapshots & Backup…") { detail = g }
             }
         } primaryAction: { ids in
             if ids.count == 1, let g = store.guests.first(where: { ids.contains($0.id) }), !g.template { detail = g }
         }
-        .searchable(text: $search, prompt: "Name, ID, node or tag")
+        .searchable(text: $search, prompt: "Name, ID, IP, node or tag")
+        .task { await store.loadAddresses(api: store.api) }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Picker("Show", selection: $filter) {
